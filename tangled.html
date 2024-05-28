@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tangled Edition</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        h1 {
+            margin-top: 20px;
+            font-size: 36px;
+        }
+        .counters {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            width: 100%;
+            margin-top: 50px;
+        }
+        .counter {
+            text-align: center;
+        }
+        .counter div {
+            font-size: 48px;
+            margin: 20px 20px;
+        }
+        .ratio {
+            font-size: 32px;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            width: 100%;
+            margin-top: 20px;
+        }
+        .control-group {
+            text-align: center;
+        }
+        .control-group button {
+            display: block;
+            width: 120px;
+            height: 50px;
+            margin: 10px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Tangled</h1>
+
+<div class="counters">
+    <div class="counter">
+        <div id="maleCount">0</div>
+        <p>Mænd</p>
+    </div>
+
+    <div class="ratio" id="ratio">
+        Ratio: 0.0
+    </div>
+
+    <div class="counter">
+        <div id="femaleCount">0</div>
+        <p>Kvinder</p>
+    </div>
+</div>
+
+<div class="controls">
+    <div class="control-group">
+        <button onclick="increment('male')">+ Mand</button>
+        <button onclick="decrement('male')">- Mand</button>
+    </div>
+
+    <div class="control-group">
+        <button onclick="incrementPair()">+ Par</button>
+        <button onclick="decrementPair()">- Par</button>
+    </div>
+
+    <div class="control-group">
+        <button onclick="increment('female')">+ Kvinde</button>
+        <button onclick="decrement('female')">- Kvinde</button>
+    </div>
+</div>
+
+<script>
+    function increment(gender) {
+        const countElement = document.getElementById(gender + 'Count');
+        let count = parseInt(countElement.textContent, 10);
+        countElement.textContent = count + 1;
+        updateRatio();
+    }
+
+    function decrement(gender) {
+        const countElement = document.getElementById(gender + 'Count');
+        let count = parseInt(countElement.textContent, 10);
+        if (count > 0) {
+            countElement.textContent = count - 1;
+        }
+        updateRatio();
+    }
+
+    function incrementPair() {
+        increment('male');
+        increment('female');
+    }
+
+    function decrementPair() {
+        const maleCountElement = document.getElementById('maleCount');
+        const femaleCountElement = document.getElementById('femaleCount');
+        let maleCount = parseInt(maleCountElement.textContent, 10);
+        let femaleCount = parseInt(femaleCountElement.textContent, 10);
+        if (maleCount > 0 && femaleCount > 0) {
+            decrement('male');
+            decrement('female');
+        }
+    }
+
+    function updateRatio() {
+        const maleCount = parseInt(document.getElementById('maleCount').textContent, 10);
+        const femaleCount = parseInt(document.getElementById('femaleCount').textContent, 10);
+        const ratioElement = document.getElementById('ratio');
+        
+        if (femaleCount === 0) {
+            ratioElement.textContent = 'Ratio: ' + (maleCount === 0 ? '0.0' : '∞');
+        } else {
+            const ratio = (maleCount / femaleCount).toFixed(1);
+            ratioElement.textContent = 'Ratio: ' + ratio;
+        }
+    }
+</script>
+
+</body>
+</html>
