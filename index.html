@@ -62,7 +62,7 @@
 <h1>Tangled</h1>
 
 <div class="total-count" id="totalCount">
-    Total: 0 mænd, 0 kvinder
+    Total: 0 mænd, 0 kvinder, 0 personer i alt
 </div>
 
 <div class="counters">
@@ -158,7 +158,8 @@
 
     function updateTotal() {
         const totalCountElement = document.getElementById('totalCount');
-        totalCountElement.textContent = `Total: ${totalMales} mænd, ${totalFemales} kvinder`;
+        const totalPersons = totalMales + totalFemales;
+        totalCountElement.textContent = `Total: ${totalMales} mænd, ${totalFemales} kvinder, ${totalPersons} personer i alt`;
     }
 </script>
 
