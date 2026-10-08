@@ -68,6 +68,22 @@
         .control-group button:hover {
             background-color: #555555;
         }
+        .reset-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 100px;
+            height: 40px;
+            font-size: 14px;
+            color: #ffffff;
+            background-color: #7a1a1a;
+            border: 2px solid #a33;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .reset-btn:hover {
+            background-color: #a02020;
+        }
     </style>
 </head>
 <body>
@@ -111,33 +127,57 @@
     </div>
 </div>
 
+<button class="reset-btn" onclick="resetAll()">Nulstil</button>
+
 <script>
     let totalMales = 0;
     let totalFemales = 0;
 
-    function increment(gender) {
-        const countElement = document.getElementById(gender + 'Count');
-        let count = parseInt(countElement.textContent, 10);
-        countElement.textContent = count + 1;
+    function setCookie(name, value) {
+        document.cookie = name + '=' + value + '; path=/; max-age=31536000';
+    }
 
-        if (gender === 'male') {
-            totalMales++;
-        } else if (gender === 'female') {
-            totalFemales++;
-        }
+    function getCookie(name) {
+        const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+        return match ? parseInt(match[1], 10) : 0;
+    }
 
+    function saveState() {
+        setCookie('totalMales', totalMales);
+        setCookie('totalFemales', totalFemales);
+    }
+
+    function loadState() {
+        totalMales = getCookie('totalMales');
+        totalFemales = getCookie('totalFemales');
+        document.getElementById('maleCount').textContent = totalMales;
+        document.getElementById('femaleCount').textContent = totalFemales;
         updateTotal();
         updateRatio();
     }
 
-    function decrement(gender) {
-        const countElement = document.getElementById(gender + 'Count');
-        let count = parseInt(countElement.textContent, 10);
-        if (count > 0) {
-            countElement.textContent = count - 1;
+    function increment(gender) {
+        if (gender === 'male') {
+            totalMales++;
+        } else {
+            totalFemales++;
         }
-
+        document.getElementById(gender + 'Count').textContent = gender === 'male' ? totalMales : totalFemales;
+        updateTotal();
         updateRatio();
+        saveState();
+    }
+
+    function decrement(gender) {
+        if (gender === 'male' && totalMales > 0) {
+            totalMales--;
+        } else if (gender === 'female' && totalFemales > 0) {
+            totalFemales--;
+        }
+        document.getElementById(gender + 'Count').textContent = gender === 'male' ? totalMales : totalFemales;
+        updateTotal();
+        updateRatio();
+        saveState();
     }
 
     function incrementPair() {
@@ -146,26 +186,28 @@
     }
 
     function decrementPair() {
-        const maleCountElement = document.getElementById('maleCount');
-        const femaleCountElement = document.getElementById('femaleCount');
-        let maleCount = parseInt(maleCountElement.textContent, 10);
-        let femaleCount = parseInt(femaleCountElement.textContent, 10);
-        if (maleCount > 0 && femaleCount > 0) {
+        if (totalMales > 0 && totalFemales > 0) {
             decrement('male');
             decrement('female');
         }
     }
 
+    function resetAll() {
+        totalMales = 0;
+        totalFemales = 0;
+        document.getElementById('maleCount').textContent = 0;
+        document.getElementById('femaleCount').textContent = 0;
+        updateTotal();
+        updateRatio();
+        saveState();
+    }
+
     function updateRatio() {
-        const maleCount = parseInt(document.getElementById('maleCount').textContent, 10);
-        const femaleCount = parseInt(document.getElementById('femaleCount').textContent, 10);
         const ratioElement = document.getElementById('ratio');
-        
-        if (femaleCount === 0) {
-            ratioElement.textContent = 'Ratio: ' + (maleCount === 0 ? '0.0' : '∞');
+        if (totalFemales === 0) {
+            ratioElement.textContent = 'Ratio: ' + (totalMales === 0 ? '0.0' : '∞');
         } else {
-            const ratio = (maleCount / femaleCount).toFixed(1);
-            ratioElement.textContent = 'Ratio: ' + ratio;
+            ratioElement.textContent = 'Ratio: ' + (totalMales / totalFemales).toFixed(1);
         }
     }
 
@@ -174,6 +216,8 @@
         const totalPersons = totalMales + totalFemales;
         totalCountElement.textContent = `Total: ${totalMales} mænd, ${totalFemales} kvinder, ${totalPersons} personer i alt`;
     }
+
+    loadState();
 </script>
 
 </body>
