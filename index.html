@@ -134,16 +134,25 @@
 
 <script>
     const counts = { male: readCookie('male'), female: readCookie('female') };
+    const totals = {
+        male: Math.max(readCookie('totalMale'), counts.male),
+        female: Math.max(readCookie('totalFemale'), counts.female),
+    };
 
     function readCookie(name) {
         const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=(\\d+)'));
         return match ? Number(match[1]) : 0;
     }
 
+    function setCookie(name, value) {
+        document.cookie = `${name}=${value}; path=/; max-age=31536000; SameSite=Lax`;
+    }
+
     function save() {
-        for (const key in counts) {
-            document.cookie = `${key}=${counts[key]}; path=/; max-age=31536000; SameSite=Lax`;
-        }
+        setCookie('male', counts.male);
+        setCookie('female', counts.female);
+        setCookie('totalMale', totals.male);
+        setCookie('totalFemale', totals.female);
     }
 
     function render() {
@@ -151,7 +160,7 @@
         document.getElementById('maleCount').textContent = male;
         document.getElementById('femaleCount').textContent = female;
         document.getElementById('totalCount').textContent =
-            `Total: ${male} mænd, ${female} kvinder, ${male + female} personer i alt`;
+            `Total: ${totals.male} mænd, ${totals.female} kvinder, ${totals.male + totals.female} personer i alt`;
         const ratio = female === 0 ? (male === 0 ? '0.0' : '∞') : (male / female).toFixed(1);
         document.getElementById('ratio').textContent = 'Ratio: ' + ratio;
     }
@@ -163,6 +172,7 @@
 
     function increment(gender) {
         counts[gender]++;
+        totals[gender]++;
         update();
     }
 
@@ -176,6 +186,8 @@
     function incrementPair() {
         counts.male++;
         counts.female++;
+        totals.male++;
+        totals.female++;
         update();
     }
 
@@ -191,6 +203,8 @@
         if (!confirm('Nulstil tællerne?')) return;
         counts.male = 0;
         counts.female = 0;
+        totals.male = 0;
+        totals.female = 0;
         update();
     }
 
