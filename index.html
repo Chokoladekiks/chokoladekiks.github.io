@@ -84,6 +84,18 @@
             border-radius: 5px;
             cursor: pointer;
         }
+        .stats-link {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            padding: 10px 14px;
+            font-size: 14px;
+            color: #ffffff;
+            background-color: #333333;
+            border: 2px solid #444444;
+            border-radius: 5px;
+            text-decoration: none;
+        }
         .reset-btn:hover {
             background-color: #a02020;
         }
@@ -130,6 +142,7 @@
     </div>
 </div>
 
+<a class="stats-link" href="stats.html">Statistik</a>
 <button class="reset-btn" onclick="resetAll()">Nulstil</button>
 
 <script>
@@ -170,31 +183,47 @@
         save();
     }
 
-    function increment(gender) {
+    function logEvent(gender, delta) {
+        try {
+            const log = JSON.parse(localStorage.getItem('log') || '[]');
+            log.push([Math.floor(Date.now() / 1000), gender, delta]);
+            localStorage.setItem('log', JSON.stringify(log));
+        } catch (e) {}
+    }
+
+    function add(gender) {
         counts[gender]++;
         totals[gender]++;
+        logEvent(gender, 1);
+    }
+
+    function subtract(gender) {
+        counts[gender]--;
+        logEvent(gender, -1);
+    }
+
+    function increment(gender) {
+        add(gender);
         update();
     }
 
     function decrement(gender) {
         if (counts[gender] > 0) {
-            counts[gender]--;
+            subtract(gender);
             update();
         }
     }
 
     function incrementPair() {
-        counts.male++;
-        counts.female++;
-        totals.male++;
-        totals.female++;
+        add('male');
+        add('female');
         update();
     }
 
     function decrementPair() {
         if (counts.male > 0 && counts.female > 0) {
-            counts.male--;
-            counts.female--;
+            subtract('male');
+            subtract('female');
             update();
         }
     }
@@ -205,6 +234,7 @@
         counts.female = 0;
         totals.male = 0;
         totals.female = 0;
+        try { localStorage.removeItem('log'); } catch (e) {}
         update();
     }
 
