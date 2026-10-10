@@ -17,6 +17,7 @@
         }
         h1 {
             margin-top: 20px;
+            margin-bottom: 4px;
             font-size: 36px;
             color: #ffffff;
         }
@@ -84,6 +85,29 @@
             border-radius: 5px;
             cursor: pointer;
         }
+        .round-label {
+            font-size: 16px;
+            color: #bbbbbb;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .all-count {
+            font-size: 16px;
+            color: #bbbbbb;
+        }
+        .round-btn {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 14px;
+            font-size: 14px;
+            color: #ffffff;
+            background-color: #333333;
+            border: 2px solid #444444;
+            border-radius: 5px;
+            cursor: pointer;
+        }
         .stats-link {
             position: fixed;
             bottom: 20px;
@@ -105,9 +129,12 @@
 
 <h1>Tangled</h1>
 
+<div class="round-label" id="roundLabel">Runde 1</div>
+
 <div class="total-count" id="totalCount">
     Total: 0 mænd, 0 kvinder, 0 personer i alt
 </div>
+<div class="all-count" id="allCount" hidden></div>
 
 <div class="counters">
     <div class="counter">
@@ -142,100 +169,79 @@
     </div>
 </div>
 
+<button class="round-btn" onclick="newRound()">Ny runde</button>
 <a class="stats-link" href="stats.html">Statistik</a>
 <button class="reset-btn" onclick="resetAll()">Nulstil</button>
 
+<script src="rounds.js"></script>
 <script>
-    const counts = { male: readCookie('male'), female: readCookie('female') };
-    const totals = {
-        male: Math.max(readCookie('totalMale'), counts.male),
-        female: Math.max(readCookie('totalFemale'), counts.female),
-    };
-
-    function readCookie(name) {
-        const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=(\\d+)'));
-        return match ? Number(match[1]) : 0;
+    function currentRound() {
+        const rounds = getRounds();
+        return rounds.length ? rounds[rounds.length - 1] : [];
     }
 
-    function setCookie(name, value) {
-        document.cookie = `${name}=${value}; path=/; max-age=31536000; SameSite=Lax`;
+    // The round a new entry will land in: empty if the pause gap has passed.
+    function activeRound() {
+        const round = currentRound();
+        const last = round[round.length - 1];
+        return last && Date.now() / 1000 - last[0] >= ROUND_GAP ? [] : round;
     }
 
-    function save() {
-        setCookie('male', counts.male);
-        setCookie('female', counts.female);
-        setCookie('totalMale', totals.male);
-        setCookie('totalFemale', totals.female);
+    function people(s) {
+        return `${s.totalMale} mænd, ${s.totalFemale} kvinder, ${s.totalMale + s.totalFemale} personer i alt`;
     }
 
     function render() {
-        const { male, female } = counts;
-        document.getElementById('maleCount').textContent = male;
-        document.getElementById('femaleCount').textContent = female;
-        document.getElementById('totalCount').textContent =
-            `Total: ${totals.male} mænd, ${totals.female} kvinder, ${totals.male + totals.female} personer i alt`;
-        const ratio = female === 0 ? (male === 0 ? '0.0' : '∞') : (male / female).toFixed(1);
+        const rounds = getRounds();
+        const s = summarize(rounds.length ? rounds[rounds.length - 1] : []);
+        document.getElementById('roundLabel').textContent = 'Runde ' + Math.max(1, rounds.length);
+        document.getElementById('maleCount').textContent = s.male;
+        document.getElementById('femaleCount').textContent = s.female;
+        document.getElementById('totalCount').textContent = 'Total: ' + people(s);
+        const all = document.getElementById('allCount');
+        all.hidden = rounds.length < 2;
+        all.textContent = 'Alle runder: ' + people(summarize(rounds.flat()));
+        const ratio = s.female === 0 ? (s.male === 0 ? '0.0' : '∞') : (s.male / s.female).toFixed(1);
         document.getElementById('ratio').textContent = 'Ratio: ' + ratio;
     }
 
-    function update() {
+    function log(...entries) {
+        const now = Math.floor(Date.now() / 1000);
+        writeStore('log', readLog().concat(entries.map(([g, d]) => [now, g, d])));
         render();
-        save();
-    }
-
-    function logEvent(gender, delta) {
-        try {
-            const log = JSON.parse(localStorage.getItem('log') || '[]');
-            log.push([Math.floor(Date.now() / 1000), gender, delta]);
-            localStorage.setItem('log', JSON.stringify(log));
-        } catch (e) {}
-    }
-
-    function add(gender) {
-        counts[gender]++;
-        totals[gender]++;
-        logEvent(gender, 1);
-    }
-
-    function subtract(gender) {
-        counts[gender]--;
-        logEvent(gender, -1);
     }
 
     function increment(gender) {
-        add(gender);
-        update();
+        log([gender, 1]);
     }
 
     function decrement(gender) {
-        if (counts[gender] > 0) {
-            subtract(gender);
-            update();
-        }
+        if (summarize(activeRound())[gender] > 0) log([gender, -1]);
     }
 
     function incrementPair() {
-        add('male');
-        add('female');
-        update();
+        log(['male', 1], ['female', 1]);
     }
 
     function decrementPair() {
-        if (counts.male > 0 && counts.female > 0) {
-            subtract('male');
-            subtract('female');
-            update();
-        }
+        const s = summarize(activeRound());
+        if (s.male > 0 && s.female > 0) log(['male', -1], ['female', -1]);
+    }
+
+    function newRound() {
+        if (activeRound().length === 0) return;
+        if (!confirm('Start en ny runde? Tællerne starter forfra, men totalen for alle runder bevares.')) return;
+        writeStore('roundStarts', readStore('roundStarts').concat(readLog().length));
+        render();
     }
 
     function resetAll() {
-        if (!confirm('Nulstil tællerne?')) return;
-        counts.male = 0;
-        counts.female = 0;
-        totals.male = 0;
-        totals.female = 0;
-        try { localStorage.removeItem('log'); } catch (e) {}
-        update();
+        if (!confirm('Nulstil alt? Alle runder og hele loggen slettes.')) return;
+        try {
+            localStorage.removeItem('log');
+            localStorage.removeItem('roundStarts');
+        } catch (e) {}
+        render();
     }
 
     render();

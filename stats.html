@@ -89,7 +89,8 @@
 </header>
 
 <div class="toolbar">
-    <div class="seg" role="group" aria-label="Interval">
+    <div class="seg" id="roundSeg" role="group" aria-label="Runde"></div>
+    <div class="seg" id="sizeSeg" role="group" aria-label="Interval">
         <button data-size="60" aria-pressed="false">1 min</button>
         <button data-size="300" aria-pressed="true">5 min</button>
     </div>
@@ -98,13 +99,11 @@
 
 <div id="content"></div>
 
+<script src="rounds.js"></script>
 <script>
     const SVGNS = 'http://www.w3.org/2000/svg';
     let bucketSize = 300;
-
-    function readLog() {
-        try { return JSON.parse(localStorage.getItem('log') || '[]'); } catch (e) { return []; }
-    }
+    let selectedRound = null;
 
     function clock(sec) {
         return new Date(sec * 1000).toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
@@ -294,26 +293,45 @@
     function render() {
         const content = document.getElementById('content');
         content.innerHTML = '';
-        const log = readLog();
-        if (log.length === 0) {
+        const rounds = getRounds().filter(r => r.length > 0);
+        renderRoundPicker(rounds);
+        if (rounds.length === 0) {
             content.innerHTML = '<p class="empty">Ingen indtastninger endnu. Tæl på forsiden, så vises statistikken her.</p>';
             return;
         }
-        const buckets = buildBuckets(log, bucketSize);
+        const s = summarize(rounds[selectedRound]);
+        const all = summarize(rounds.flat());
+        content.insertAdjacentHTML('beforeend', `<p class="sub">Runde ${selectedRound + 1}: ${s.totalMale} mænd, ${s.totalFemale} kvinder, ${s.totalMale + s.totalFemale} personer i alt` +
+            (rounds.length > 1 ? `<br>Alle runder: ${all.totalMale} mænd, ${all.totalFemale} kvinder, ${all.totalMale + all.totalFemale} personer i alt` : '') + '</p>');
+        const buckets = buildBuckets(rounds[selectedRound], bucketSize);
         barChart(buckets);
         ratioChart(buckets);
         table(buckets);
     }
 
-    document.querySelectorAll('.seg button').forEach(btn => btn.addEventListener('click', () => {
+    function renderRoundPicker(rounds) {
+        if (selectedRound === null || selectedRound >= rounds.length) selectedRound = Math.max(0, rounds.length - 1);
+        const seg = document.getElementById('roundSeg');
+        seg.hidden = rounds.length < 2;
+        seg.innerHTML = '';
+        rounds.forEach((_, i) => {
+            const btn = document.createElement('button');
+            btn.textContent = 'Runde ' + (i + 1);
+            btn.setAttribute('aria-pressed', i === selectedRound);
+            btn.addEventListener('click', () => { selectedRound = i; render(); });
+            seg.appendChild(btn);
+        });
+    }
+
+    document.querySelectorAll('#sizeSeg button').forEach(btn => btn.addEventListener('click', () => {
         bucketSize = Number(btn.dataset.size);
-        document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b === btn));
+        document.querySelectorAll('#sizeSeg button').forEach(b => b.setAttribute('aria-pressed', b === btn));
         render();
     }));
 
     document.getElementById('csv').addEventListener('click', () => {
-        const lines = ['tidspunkt,køn,ændring'].concat(readLog().map(([t, g, d]) =>
-            `${new Date(t * 1000).toISOString()},${g === 'male' ? 'mand' : 'kvinde'},${d}`));
+        const lines = ['runde,tidspunkt,køn,ændring'].concat(getRounds().flatMap((r, i) => r.map(([t, g, d]) =>
+            `${i + 1},${new Date(t * 1000).toISOString()},${g === 'male' ? 'mand' : 'kvinde'},${d}`)));
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
         a.download = 'tangled-log.csv';
