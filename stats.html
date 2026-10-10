@@ -60,6 +60,7 @@
         .legend span { display: inline-flex; align-items: center; gap: 6px; }
         .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
         svg { display: block; width: 100%; overflow: visible; }
+        .legend svg { display: inline-block; width: 12px; flex: none; }
         svg text { fill: var(--muted); font-size: 11px; }
         .tip {
             position: absolute;
@@ -89,7 +90,8 @@
 </header>
 
 <div class="toolbar">
-    <div class="seg" role="group" aria-label="Interval">
+    <div class="seg" id="roundSeg" role="group" aria-label="Runde"></div>
+    <div class="seg" id="sizeSeg" role="group" aria-label="Interval">
         <button data-size="60" aria-pressed="false">1 min</button>
         <button data-size="300" aria-pressed="true">5 min</button>
     </div>
@@ -98,13 +100,11 @@
 
 <div id="content"></div>
 
+<script src="rounds.js"></script>
 <script>
     const SVGNS = 'http://www.w3.org/2000/svg';
     let bucketSize = 300;
-
-    function readLog() {
-        try { return JSON.parse(localStorage.getItem('log') || '[]'); } catch (e) { return []; }
-    }
+    let selectedRound = null;
 
     function clock(sec) {
         return new Date(sec * 1000).toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
@@ -113,16 +113,18 @@
     function buildBuckets(log, size) {
         const start = Math.floor(log[0][0] / size) * size;
         const n = Math.floor((log[log.length - 1][0] - start) / size) + 1;
-        const buckets = Array.from({ length: n }, (_, i) => ({ start: start + i * size, male: 0, female: 0 }));
+        const buckets = Array.from({ length: n }, (_, i) => ({
+            start: start + i * size,
+            in: { male: 0, female: 0 },
+            out: { male: 0, female: 0 },
+        }));
         let cumMale = 0, cumFemale = 0, i = 0;
         for (const b of buckets) {
             while (i < log.length && log[i][0] < b.start + size) {
                 const [, g, d] = log[i++];
-                b[g] += d;
+                b[d > 0 ? 'in' : 'out'][g]++;
                 if (g === 'male') cumMale += d; else cumFemale += d;
             }
-            b.male = Math.max(0, b.male);
-            b.female = Math.max(0, b.female);
             b.cumMale = cumMale;
             b.cumFemale = cumFemale;
             b.ratio = cumFemale > 0 ? cumMale / cumFemale : null;
@@ -162,28 +164,43 @@
         return Math.max(1, Math.ceil(n / Math.max(1, Math.floor(width / 48))));
     }
 
+    function barPath(x, y0, y1, w) {
+        const h = Math.abs(y1 - y0), r = Math.min(4, w / 2, h), dir = y1 < y0 ? -1 : 1;
+        return `M${x},${y0}V${y1 - dir * r}q0,${dir * r} ${r},${dir * r}h${w - 2 * r}q${r},0 ${r},${-dir * r}V${y0}Z`;
+    }
+
+    function genderDiff(male, female, verb) {
+        const diff = male - female;
+        return diff === 0 ? `Lige mange ${verb}` : `${Math.abs(diff)} flere ${diff > 0 ? 'mænd' : 'kvinder'} ${verb}`;
+    }
+
     function barChart(buckets) {
-        const c = card('Ankomster pr. interval', 'Mænd og kvinder pr. interval. Den skraverede del viser, hvor mange flere der kom af det ene køn.');
+        const c = card('Kommet og gået pr. interval',
+            'Over linjen: kommet. Under linjen: gået. Tallet over søjlerne viser, hvor mange flere mænd (M) eller kvinder (K) der kom.');
         c.insertAdjacentHTML('beforeend', `<div class="legend">
             <span><i class="sw" style="background:var(--male)"></i>Mænd</span>
             <span><i class="sw" style="background:var(--female)"></i>Kvinder</span>
-            <span><svg width="12" height="12"><rect width="12" height="12" rx="3" fill="#888"/><rect width="12" height="12" rx="3" fill="url(#hatch)"/></svg>Forskel</span>
+            <span><svg width="12" height="12"><rect width="12" height="12" rx="3" fill="#888"/><rect width="12" height="12" rx="3" fill="url(#hatch)"/></svg>Flere af det ene køn</span>
+            <span><i class="sw" style="background:#888;opacity:.45"></i>Gået (under linjen)</span>
         </div>`);
         const tip = document.createElement('div');
         tip.className = 'tip';
         c.appendChild(tip);
 
-        const W = c.clientWidth - 32, H = 240;
-        const m = { t: 10, r: 4, b: 24, l: 28 };
+        const W = c.clientWidth - 32, H = 280;
+        const m = { t: 20, r: 4, b: 24, l: 28 };
         const iw = W - m.l - m.r, ih = H - m.t - m.b;
-        const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Søjlediagram over ankomster af mænd og kvinder' }, c);
+        const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Søjlediagram over mænd og kvinder der kom og gik' }, c);
 
-        const max = niceMax(Math.max(1, ...buckets.map(b => Math.max(b.male, b.female))));
-        const y = v => m.t + ih - (v / max) * ih;
-        for (let i = 0; i <= 4; i++) {
-            const v = max * i / 4;
+        const maxIn = Math.max(0, ...buckets.map(b => Math.max(b.in.male, b.in.female)));
+        const maxOut = Math.max(0, ...buckets.map(b => Math.max(b.out.male, b.out.female)));
+        const step = niceMax(Math.max(1, maxIn, maxOut)) / 4;
+        const top = Math.max(step, Math.ceil(maxIn / step) * step);
+        const bottom = Math.ceil(maxOut / step) * step;
+        const y = v => m.t + (top - v) / (top + bottom) * ih;
+        for (let v = -bottom; v <= top; v += step) {
             el('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: 'var(--grid)' }, svg);
-            el('text', { x: m.l - 6, y: y(v) + 4, 'text-anchor': 'end' }, svg).textContent = v;
+            el('text', { x: m.l - 6, y: y(v) + 4, 'text-anchor': 'end' }, svg).textContent = Math.abs(v);
         }
 
         const slot = iw / buckets.length;
@@ -191,26 +208,33 @@
         const every = xLabelEvery(buckets.length, iw);
         buckets.forEach((b, i) => {
             const cx = m.l + slot * i + slot / 2;
-            const lo = Math.min(b.male, b.female);
+            const lo = Math.min(b.in.male, b.in.female);
             [['male', cx - barW - 1], ['female', cx + 1]].forEach(([g, x]) => {
-                const v = b[g];
-                if (v <= 0) return;
-                const top = y(v), h = y(0) - top, r = Math.min(4, barW / 2, h);
-                const d = `M${x},${y(0)}V${top + r}q0,-${r} ${r},-${r}h${barW - 2 * r}q${r},0 ${r},${r}V${y(0)}Z`;
-                el('path', { d, fill: `var(--${g})` }, svg);
-                if (v > lo) {
-                    el('path', { d: `M${x},${y(lo)}V${top + r}q0,-${r} ${r},-${r}h${barW - 2 * r}q${r},0 ${r},${r}V${y(lo)}Z`, fill: 'url(#hatch)' }, svg);
-                    el('line', { x1: x, x2: x + barW, y1: y(lo), y2: y(lo), stroke: 'var(--surface-2)', 'stroke-width': 2 }, svg);
+                const v = b.in[g];
+                if (v > 0) {
+                    el('path', { d: barPath(x, y(0), y(v), barW), fill: `var(--${g})` }, svg);
+                    if (v > lo) {
+                        el('path', { d: barPath(x, y(lo), y(v), barW), fill: 'url(#hatch)' }, svg);
+                        el('line', { x1: x, x2: x + barW, y1: y(lo), y2: y(lo), stroke: 'var(--surface-2)', 'stroke-width': 2 }, svg);
+                    }
                 }
+                const out = b.out[g];
+                if (out > 0) el('path', { d: barPath(x, y(0), y(-out), barW), fill: `var(--${g})`, 'fill-opacity': 0.45 }, svg);
             });
+            const diff = b.in.male - b.in.female;
+            if (diff !== 0 && slot >= 30) {
+                const label = el('text', { x: cx, y: y(Math.max(b.in.male, b.in.female)) - 5, 'text-anchor': 'middle' }, svg);
+                label.textContent = `+${Math.abs(diff)} ${diff > 0 ? 'M' : 'K'}`;
+                label.style.fill = 'var(--text-2)';
+            }
             if (i % every === 0) el('text', { x: cx, y: H - 6, 'text-anchor': 'middle' }, svg).textContent = clock(b.start);
 
             const hit = el('rect', { x: m.l + slot * i, y: m.t, width: slot, height: ih, fill: 'transparent' }, svg);
             const enter = () => {
-                const diff = b.male - b.female;
-                const diffText = diff === 0 ? 'Lige mange' : `${Math.abs(diff)} flere ${diff > 0 ? 'mænd' : 'kvinder'}`;
-                showTip(tip, c, `<b>${clock(b.start)}–${clock(b.start + bucketSize)}</b><br>Mænd: ${b.male}<br>Kvinder: ${b.female}<br>${diffText}`,
-                    16 + cx * (c.clientWidth - 32) / W, svg.getBoundingClientRect().top - c.getBoundingClientRect().top + y(Math.max(b.male, b.female)) * (svg.clientHeight / H));
+                showTip(tip, c, `<b>${clock(b.start)}–${clock(b.start + bucketSize)}</b><br>` +
+                    `Mænd: ${b.in.male} kom, ${b.out.male} gik<br>Kvinder: ${b.in.female} kom, ${b.out.female} gik<br>` +
+                    genderDiff(b.in.male, b.in.female, 'kom'),
+                    16 + cx * (c.clientWidth - 32) / W, svg.getBoundingClientRect().top - c.getBoundingClientRect().top + y(Math.max(b.in.male, b.in.female)) * (svg.clientHeight / H));
             };
             hit.addEventListener('pointerenter', enter);
             hit.addEventListener('pointerdown', enter);
@@ -284,9 +308,9 @@
     function table(buckets) {
         const c = card('Tabel', '');
         c.querySelector('.sub').remove();
-        const rows = buckets.map(b => `<tr><td>${clock(b.start)}</td><td>${b.male}</td><td>${b.female}</td><td>${b.ratio === null ? '–' : b.ratio.toFixed(2).replace('.', ',')}</td></tr>`).join('');
+        const rows = buckets.map(b => `<tr><td>${clock(b.start)}</td><td>${b.in.male}</td><td>${b.out.male}</td><td>${b.in.female}</td><td>${b.out.female}</td><td>${b.ratio === null ? '–' : b.ratio.toFixed(2).replace('.', ',')}</td></tr>`).join('');
         c.insertAdjacentHTML('beforeend', `<details><summary>Vis tal</summary><table>
-            <thead><tr><th>Fra</th><th>Mænd</th><th>Kvinder</th><th>Ratio (samlet)</th></tr></thead>
+            <thead><tr><th>Fra</th><th>Mænd kom</th><th>Mænd gik</th><th>Kvinder kom</th><th>Kvinder gik</th><th>Ratio (samlet)</th></tr></thead>
             <tbody>${rows}</tbody></table></details>`);
         c.querySelector('h2').remove();
     }
@@ -294,26 +318,45 @@
     function render() {
         const content = document.getElementById('content');
         content.innerHTML = '';
-        const log = readLog();
-        if (log.length === 0) {
+        const rounds = getRounds().filter(r => r.length > 0);
+        renderRoundPicker(rounds);
+        if (rounds.length === 0) {
             content.innerHTML = '<p class="empty">Ingen indtastninger endnu. Tæl på forsiden, så vises statistikken her.</p>';
             return;
         }
-        const buckets = buildBuckets(log, bucketSize);
+        const s = summarize(rounds[selectedRound]);
+        const all = summarize(rounds.flat());
+        content.insertAdjacentHTML('beforeend', `<p class="sub">Runde ${selectedRound + 1}: ${s.totalMale} mænd, ${s.totalFemale} kvinder, ${s.totalMale + s.totalFemale} personer i alt` +
+            (rounds.length > 1 ? `<br>Alle runder: ${all.totalMale} mænd, ${all.totalFemale} kvinder, ${all.totalMale + all.totalFemale} personer i alt` : '') + '</p>');
+        const buckets = buildBuckets(rounds[selectedRound], bucketSize);
         barChart(buckets);
         ratioChart(buckets);
         table(buckets);
     }
 
-    document.querySelectorAll('.seg button').forEach(btn => btn.addEventListener('click', () => {
+    function renderRoundPicker(rounds) {
+        if (selectedRound === null || selectedRound >= rounds.length) selectedRound = Math.max(0, rounds.length - 1);
+        const seg = document.getElementById('roundSeg');
+        seg.hidden = rounds.length < 2;
+        seg.innerHTML = '';
+        rounds.forEach((_, i) => {
+            const btn = document.createElement('button');
+            btn.textContent = 'Runde ' + (i + 1);
+            btn.setAttribute('aria-pressed', i === selectedRound);
+            btn.addEventListener('click', () => { selectedRound = i; render(); });
+            seg.appendChild(btn);
+        });
+    }
+
+    document.querySelectorAll('#sizeSeg button').forEach(btn => btn.addEventListener('click', () => {
         bucketSize = Number(btn.dataset.size);
-        document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', b === btn));
+        document.querySelectorAll('#sizeSeg button').forEach(b => b.setAttribute('aria-pressed', b === btn));
         render();
     }));
 
     document.getElementById('csv').addEventListener('click', () => {
-        const lines = ['tidspunkt,køn,ændring'].concat(readLog().map(([t, g, d]) =>
-            `${new Date(t * 1000).toISOString()},${g === 'male' ? 'mand' : 'kvinde'},${d}`));
+        const lines = ['runde,tidspunkt,køn,ændring'].concat(getRounds().flatMap((r, i) => r.map(([t, g, d]) =>
+            `${i + 1},${new Date(t * 1000).toISOString()},${g === 'male' ? 'mand' : 'kvinde'},${d}`)));
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
         a.download = 'tangled-log.csv';
