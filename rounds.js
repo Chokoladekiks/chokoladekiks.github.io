@@ -1,4 +1,6 @@
-const ROUND_GAP = 20 * 60;
+// A round is one session (e.g. a 2-hour evening), so only a long break starts a new one by
+// itself; quiet spells inside a session must not split it. "Ny runde" still starts one by hand.
+const ROUND_GAP = 3 * 60 * 60;
 
 function readStore(key) {
     try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) { return []; }
