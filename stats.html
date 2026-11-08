@@ -356,6 +356,75 @@
         area.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideRatio(); });
     }
 
+    // How many are there at the end of each interval: everyone counted so far (start counts
+    // included) minus those who left. Same reading as the ratio chart.
+    function crowdChart(buckets) {
+        const c = card('Til stede over tid', 'Hvor mange der er til stede ved slutningen af hvert interval, inklusive startantallet.');
+        c.insertAdjacentHTML('beforeend', `<div class="legend">
+            <span><i class="sw" style="background:var(--text)"></i>I alt</span>
+            <span><i class="sw" style="background:var(--male)"></i>Mænd</span>
+            <span><i class="sw" style="background:var(--female)"></i>Kvinder</span>
+        </div>`);
+        const tip = document.createElement('div');
+        tip.className = 'tip';
+        c.appendChild(tip);
+
+        const W = c.clientWidth - 32, H = 220;
+        const m = { t: 10, r: 8, b: 24, l: 32 };
+        const iw = W - m.l - m.r, ih = H - m.t - m.b;
+        const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Linjediagram over antal mænd, kvinder og i alt til stede', 'data-touch-chart': '' }, c);
+
+        const max = niceMax(Math.max(1, ...buckets.map(b => b.cumMale + b.cumFemale)));
+        const y = v => m.t + ih - (v / max) * ih;
+        const slot = iw / buckets.length;
+        const x = i => m.l + slot * i + slot / 2;
+        for (let k = 0; k <= 4; k++) {
+            const v = max * k / 4;
+            el('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: 'var(--grid)' }, svg);
+            el('text', { x: m.l - 6, y: y(v) + 4, 'text-anchor': 'end' }, svg).textContent = Math.round(v);
+        }
+        const every = xLabelEvery(buckets.length, iw);
+        buckets.forEach((b, i) => {
+            if (i % every === 0) el('text', { x: x(i), y: H - 6, 'text-anchor': 'middle' }, svg).textContent = clock(b.start + bucketSize);
+        });
+
+        const series = [
+            ['var(--male)', b => b.cumMale, 2],
+            ['var(--female)', b => b.cumFemale, 2],
+            ['var(--text)', b => b.cumMale + b.cumFemale, 2.5],
+        ];
+        const dots = series.map(([color, value, width]) => {
+            el('path', {
+                d: buckets.map((b, i) => `${i ? 'L' : 'M'}${x(i)},${y(value(b))}`).join(''),
+                fill: 'none', stroke: color, 'stroke-width': width, 'stroke-linejoin': 'round'
+            }, svg);
+            return el('circle', { r: 5, fill: color, stroke: 'var(--surface-2)', 'stroke-width': 2, visibility: 'hidden' }, svg);
+        });
+
+        const cross = el('line', { y1: m.t, y2: m.t + ih, stroke: 'var(--muted)', visibility: 'hidden', 'pointer-events': 'none' }, svg);
+        const area = el('rect', { x: m.l, y: m.t, width: iw, height: ih, fill: 'transparent' }, svg);
+        const move = e => {
+            const r = svg.getBoundingClientRect();
+            const i = Math.max(0, Math.min(buckets.length - 1, Math.floor(((e.clientX - r.left) * W / r.width - m.l) / slot)));
+            const b = buckets[i];
+            cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible');
+            series.forEach(([, value], k) => {
+                dots[k].setAttribute('cx', x(i)); dots[k].setAttribute('cy', y(value(b))); dots[k].setAttribute('visibility', 'visible');
+            });
+            showTip(tip, c, `<b>Kl. ${clock(b.start + bucketSize)}</b><br>I alt: ${b.cumMale + b.cumFemale}<br>Mænd: ${b.cumMale}<br>Kvinder: ${b.cumFemale}`,
+                16 + x(i) * r.width / W, r.top - c.getBoundingClientRect().top + y(b.cumMale + b.cumFemale) * r.height / H);
+        };
+        const hide = () => {
+            tip.style.display = 'none';
+            cross.setAttribute('visibility', 'hidden');
+            dots.forEach(d => d.setAttribute('visibility', 'hidden'));
+        };
+        hiders.push(hide);
+        area.addEventListener('pointermove', move);
+        area.addEventListener('pointerdown', e => { hideAllTips(); move(e); });
+        area.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); });
+    }
+
     function table(buckets) {
         const c = card('Tabel', '');
         c.querySelector('.sub').remove();
@@ -423,6 +492,7 @@
             }
             barChart(shown);
             ratioChart(shown);
+            crowdChart(shown);
             table(shown);
         } finally {
             cardTarget = null;
