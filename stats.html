@@ -60,6 +60,9 @@
         .legend span { display: inline-flex; align-items: center; gap: 6px; }
         .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
         svg { display: block; width: 100%; overflow: visible; }
+        /* Charts are read by tapping on a tablet: no text selection or long-press menu, and
+           sideways drags move the marker while vertical drags still scroll the page. */
+        svg[data-touch-chart] { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: pan-y; }
         .legend svg { display: inline-block; width: 12px; flex: none; }
         svg text { fill: var(--muted); font-size: 11px; }
         .tip {
@@ -69,8 +72,8 @@
             border: 1px solid #444;
             border-radius: 6px;
             padding: 6px 8px;
-            font-size: 13px;
-            line-height: 1.4;
+            font-size: 15px;
+            line-height: 1.45;
             white-space: nowrap;
             display: none;
             z-index: 2;
@@ -172,6 +175,16 @@
         return Math.max(4, Math.ceil(v / 4) * 4);
     }
 
+    // Tooltips stay open after a tap (a finger can't hover); a tap outside the charts or on
+    // another chart closes them. With a mouse they follow the pointer as before.
+    const hiders = [];
+    function hideAllTips() {
+        hiders.forEach(f => f());
+    }
+    document.addEventListener('pointerdown', e => {
+        if (!e.target.closest('svg[data-touch-chart]')) hideAllTips();
+    });
+
     function showTip(tip, card, html, x, y) {
         tip.innerHTML = html;
         tip.style.display = 'block';
@@ -221,7 +234,7 @@
         const W = c.clientWidth - 32, H = 280;
         const m = { t: 20, r: 4, b: 24, l: 28 };
         const iw = W - m.l - m.r, ih = H - m.t - m.b;
-        const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Søjlediagram over mænd og kvinder der kom og gik' }, c);
+        const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Søjlediagram over mænd og kvinder der kom og gik', 'data-touch-chart': '' }, c);
 
         const maxIn = Math.max(0, ...buckets.map(b => Math.max(b.in.male, b.in.female)));
         const maxOut = Math.max(0, ...buckets.map(b => Math.max(b.out.male, b.out.female)));
@@ -236,6 +249,9 @@
 
         const slot = iw / buckets.length;
         const barW = Math.max(2, Math.min(28, (slot - 6) / 2));
+        const mark = el('rect', { y: m.t, width: slot, height: ih, fill: '#fff', 'fill-opacity': 0.07, rx: 4, visibility: 'hidden' }, svg);
+        const hideBar = () => { tip.style.display = 'none'; mark.setAttribute('visibility', 'hidden'); };
+        hiders.push(hideBar);
         const every = xLabelEvery(buckets.length, iw);
         buckets.forEach((b, i) => {
             const cx = m.l + slot * i + slot / 2;
@@ -262,16 +278,18 @@
 
             const hit = el('rect', { x: m.l + slot * i, y: m.t, width: slot, height: ih, fill: 'transparent' }, svg);
             const enter = () => {
+                mark.setAttribute('x', m.l + slot * i);
+                mark.setAttribute('visibility', 'visible');
                 showTip(tip, c, `<b>${clock(b.start)}–${clock(b.start + bucketSize)}</b><br>` +
                     `Mænd: ${b.in.male} kom, ${b.out.male} gik<br>Kvinder: ${b.in.female} kom, ${b.out.female} gik<br>` +
                     genderDiff(b.in.male, b.in.female, 'kom'),
                     16 + cx * (c.clientWidth - 32) / W, svg.getBoundingClientRect().top - c.getBoundingClientRect().top + y(Math.max(b.in.male, b.in.female)) * (svg.clientHeight / H));
             };
-            hit.addEventListener('pointerenter', enter);
-            hit.addEventListener('pointerdown', enter);
-            hit.addEventListener('pointerleave', () => tip.style.display = 'none');
+            hit.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') enter(); });
+            hit.addEventListener('pointerdown', () => { hideAllTips(); enter(); });
+            hit.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideBar(); });
         });
-        el('line', { x1: m.l, x2: W - m.r, y1: y(0), y2: y(0), stroke: 'var(--muted)' }, svg);
+        el('line', { x1: m.l, x2: W - m.r, y1: y(0), y2: y(0), stroke: 'var(--muted)', 'pointer-events': 'none' }, svg);
     }
 
     function ratioChart(buckets) {
@@ -289,7 +307,7 @@
         const W = c.clientWidth - 32, H = 200;
         const m = { t: 10, r: 8, b: 24, l: 28 };
         const iw = W - m.l - m.r, ih = H - m.t - m.b;
-        const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Linjediagram over ratio mellem mænd og kvinder' }, c);
+        const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Linjediagram over ratio mellem mænd og kvinder', 'data-touch-chart': '' }, c);
 
         const max = Math.max(2, Math.ceil(Math.max(...pts.map(p => p.ratio)) / 2) * 2);
         const y = v => m.t + ih - (v / max) * ih;
@@ -327,13 +345,15 @@
             showTip(tip, c, `<b>Kl. ${clock(p.start + bucketSize)}</b><br>Ratio: ${p.ratio.toFixed(2).replace('.', ',')}<br>${p.cumMale} mænd, ${p.cumFemale} kvinder`,
                 16 + x(p.i) * r.width / W, r.top - c.getBoundingClientRect().top + y(p.ratio) * r.height / H);
         };
-        area.addEventListener('pointermove', move);
-        area.addEventListener('pointerdown', move);
-        area.addEventListener('pointerleave', () => {
+        const hideRatio = () => {
             tip.style.display = 'none';
             cross.setAttribute('visibility', 'hidden');
             dot.setAttribute('visibility', 'hidden');
-        });
+        };
+        hiders.push(hideRatio);
+        area.addEventListener('pointermove', move);
+        area.addEventListener('pointerdown', e => { hideAllTips(); move(e); });
+        area.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideRatio(); });
     }
 
     function table(buckets) {
@@ -390,6 +410,7 @@
 
     function renderCharts(buckets, charts) {
         charts.innerHTML = '';
+        hiders.length = 0;
         const shown = zoomed(buckets);
         cardTarget = charts;
         try {
