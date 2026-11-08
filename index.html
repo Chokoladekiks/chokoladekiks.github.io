@@ -135,6 +135,47 @@
         .reset-btn:hover {
             background-color: #a02020;
         }
+        .start-btn {
+            margin-top: 16px;
+            padding: 10px 14px;
+            font-size: 14px;
+            color: #ffffff;
+            background-color: #333333;
+            border: 2px solid #444444;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        dialog {
+            background: #1e1e1e;
+            color: #e0e0e0;
+            border: 2px solid #444444;
+            border-radius: 8px;
+            padding: 20px;
+            max-width: 90vw;
+        }
+        dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+        dialog h2 { margin: 0 0 8px; font-size: 20px; }
+        dialog p { margin: 0 0 14px; color: #bbbbbb; font-size: 14px; max-width: 320px; }
+        dialog label { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 10px 0; font-size: 18px; }
+        dialog input {
+            width: 100px;
+            font-size: 22px;
+            padding: 6px;
+            background: #121212;
+            color: #ffffff;
+            border: 2px solid #444444;
+            border-radius: 5px;
+        }
+        dialog .dialog-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+        dialog .dialog-buttons button {
+            padding: 10px 16px;
+            font-size: 16px;
+            color: #ffffff;
+            background-color: #333333;
+            border: 2px solid #444444;
+            border-radius: 5px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -181,6 +222,21 @@
     </div>
 </div>
 
+<button class="start-btn" onclick="openStart()">Startantal</button>
+
+<dialog id="startDialog">
+    <form method="dialog" onsubmit="saveStart()">
+        <h2>Startantal</h2>
+        <p>Hvor mange er her allerede, når I begynder at tælle? De tæller med i totalen og ratioen, men ikke som kommet i statistikken.</p>
+        <label>Mænd <input type="number" id="startMale" min="0" inputmode="numeric" placeholder="0"></label>
+        <label>Kvinder <input type="number" id="startFemale" min="0" inputmode="numeric" placeholder="0"></label>
+        <div class="dialog-buttons">
+            <button type="button" onclick="document.getElementById('startDialog').close()">Annuller</button>
+            <button type="submit">Gem</button>
+        </div>
+    </form>
+</dialog>
+
 <button class="round-btn" onclick="newRound()">Ny runde</button>
 <a class="stats-link" href="stats.html">Statistik</a>
 <button class="reset-btn" onclick="resetAll()">Nulstil</button>
@@ -219,8 +275,27 @@
 
     function log(...entries) {
         const now = Math.floor(Date.now() / 1000);
-        writeStore('log', readLog().concat(entries.map(([g, d]) => [now, g, d])));
+        writeStore('log', readLog().concat(entries.map(([g, d, kind]) => kind ? [now, g, d, kind] : [now, g, d])));
         render();
+    }
+
+    function openStart() {
+        document.getElementById('startMale').value = '';
+        document.getElementById('startFemale').value = '';
+        document.getElementById('startDialog').showModal();
+        document.getElementById('startMale').focus();
+    }
+
+    function saveStart() {
+        const male = Math.max(0, parseInt(document.getElementById('startMale').value, 10) || 0);
+        const female = Math.max(0, parseInt(document.getElementById('startFemale').value, 10) || 0);
+        if (male + female === 0) return;
+        if (activeRound().some(e => !isStart(e)) &&
+            !confirm('Runden er allerede i gang. Lægge startantallet til nu alligevel? Tryk Ny runde først, hvis det er en ny runde.')) return;
+        const entries = [];
+        if (male) entries.push(['male', male, 'start']);
+        if (female) entries.push(['female', female, 'start']);
+        log(...entries);
     }
 
     function increment(gender) {

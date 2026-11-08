@@ -31,11 +31,25 @@ function getRounds() {
     return splitRounds(readLog(), readStore('roundStarts'));
 }
 
+// Log entries are [time, gender, change] or, for people already there when counting
+// started, [time, gender, count, 'start']. Start entries count as present and in the totals,
+// but not as having come during the round.
+function isStart(entry) {
+    return entry[3] === 'start';
+}
+
 function summarize(entries) {
-    const s = { male: 0, female: 0, totalMale: 0, totalFemale: 0 };
-    for (const [, g, d] of entries) {
+    const s = { male: 0, female: 0, totalMale: 0, totalFemale: 0, startMale: 0, startFemale: 0 };
+    for (const entry of entries) {
+        const [, g, d] = entry;
+        const G = g === 'male' ? 'Male' : 'Female';
         s[g] += d;
-        if (d > 0) s[g === 'male' ? 'totalMale' : 'totalFemale']++;
+        if (isStart(entry)) {
+            s['start' + G] += d;
+            s['total' + G] += d;
+        } else if (d > 0) {
+            s['total' + G]++;
+        }
     }
     return s;
 }

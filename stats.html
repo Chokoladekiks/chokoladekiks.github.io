@@ -80,6 +80,24 @@
         table { border-collapse: collapse; width: 100%; margin-top: 8px; }
         th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
         th:first-child, td:first-child { text-align: left; }
+        .source {
+            background: #2a2416;
+            border: 1px solid #5a4a20;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin: -8px 0 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 14px;
+        }
+        .error { color: #ff8a80; }
+        .zoom label { display: grid; grid-template-columns: 3.5em 1fr 3.5em; align-items: center; gap: 10px; margin: 8px 0; font-size: 14px; color: var(--text-2); }
+        .zoom input[type=range] { width: 100%; accent-color: #888; }
+        .zoom output { color: var(--text); font-variant-numeric: tabular-nums; }
+        .zoom .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
     </style>
 </head>
 <body>
@@ -96,7 +114,10 @@
         <button data-size="300" aria-pressed="true">5 min</button>
     </div>
     <button id="csv">Hent CSV</button>
+    <button id="importBtn">Importér CSV</button>
+    <input type="file" id="importFile" accept=".csv,text/csv" hidden>
 </div>
+<div id="sourceBar"></div>
 
 <div id="content"></div>
 
@@ -105,6 +126,12 @@
     const SVGNS = 'http://www.w3.org/2000/svg';
     let bucketSize = 300;
     let selectedRound = null;
+    let imported = null;   // { name, rounds } from an imported CSV; shown instead of this device's log
+    let zoom = null;       // [fromSec, toSec] of the shown period, or null for the whole round
+
+    function sourceRounds() {
+        return imported ? imported.rounds : getRounds().filter(r => r.length > 0);
+    }
 
     function clock(sec) {
         return new Date(sec * 1000).toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
@@ -121,8 +148,10 @@
         let cumMale = 0, cumFemale = 0, i = 0;
         for (const b of buckets) {
             while (i < log.length && log[i][0] < b.start + size) {
-                const [, g, d] = log[i++];
-                b[d > 0 ? 'in' : 'out'][g]++;
+                const entry = log[i++];
+                const [, g, d] = entry;
+                // People already there at the start count as present, not as having come.
+                if (!isStart(entry)) b[d > 0 ? 'in' : 'out'][g]++;
                 if (g === 'male') cumMale += d; else cumFemale += d;
             }
             b.cumMale = cumMale;
@@ -152,11 +181,13 @@
         tip.style.top = (y - tip.offsetHeight - 8) + 'px';
     }
 
+    let cardTarget = null;  // where card() adds new cards; #content unless set
+
     function card(title, sub) {
         const c = document.createElement('section');
         c.className = 'card';
         c.innerHTML = `<h2>${title}</h2><p class="sub">${sub}</p>`;
-        document.getElementById('content').appendChild(c);
+        (cardTarget || document.getElementById('content')).appendChild(c);
         return c;
     }
 
@@ -315,10 +346,23 @@
         c.querySelector('h2').remove();
     }
 
+    function renderSource() {
+        const bar = document.getElementById('sourceBar');
+        bar.innerHTML = '';
+        if (!imported) return;
+        bar.innerHTML = `<div class="source"><span>Viser filen <b></b> (${imported.rounds.flat().length} indtastninger). Tablettens egne data er urørte.</span>
+            <button id="backToDevice">Vis tablettens data</button></div>`;
+        bar.querySelector('b').textContent = imported.name;
+        bar.querySelector('#backToDevice').addEventListener('click', () => {
+            imported = null; selectedRound = null; zoom = null;
+            renderSource(); render();
+        });
+    }
+
     function render() {
         const content = document.getElementById('content');
         content.innerHTML = '';
-        const rounds = getRounds().filter(r => r.length > 0);
+        const rounds = sourceRounds();
         renderRoundPicker(rounds);
         if (rounds.length === 0) {
             content.innerHTML = '<p class="empty">Ingen indtastninger endnu. Tæl på forsiden, så vises statistikken her.</p>';
@@ -326,12 +370,100 @@
         }
         const s = summarize(rounds[selectedRound]);
         const all = summarize(rounds.flat());
-        content.insertAdjacentHTML('beforeend', `<p class="sub">Runde ${selectedRound + 1}: ${s.totalMale} mænd, ${s.totalFemale} kvinder, ${s.totalMale + s.totalFemale} personer i alt` +
+        const start = s.startMale + s.startFemale > 0 ? `<br>Heraf ved start: ${s.startMale} mænd, ${s.startFemale} kvinder` : '';
+        content.insertAdjacentHTML('beforeend', `<p class="sub">Runde ${selectedRound + 1}: ${s.totalMale} mænd, ${s.totalFemale} kvinder, ${s.totalMale + s.totalFemale} personer i alt` + start +
             (rounds.length > 1 ? `<br>Alle runder: ${all.totalMale} mænd, ${all.totalFemale} kvinder, ${all.totalMale + all.totalFemale} personer i alt` : '') + '</p>');
         const buckets = buildBuckets(rounds[selectedRound], bucketSize);
-        barChart(buckets);
-        ratioChart(buckets);
-        table(buckets);
+        const charts = document.createElement('div');
+        zoomControls(buckets, charts);
+        content.appendChild(charts);
+        renderCharts(buckets, charts);
+    }
+
+    // The buckets inside the zoomed period. Running totals and the ratio still count everyone
+    // from the start of the round, so zooming never changes who was there.
+    function zoomed(buckets) {
+        if (!zoom) return buckets;
+        const shown = buckets.filter(b => b.start + bucketSize > zoom[0] && b.start < zoom[1]);
+        return shown.length ? shown : buckets;
+    }
+
+    function renderCharts(buckets, charts) {
+        charts.innerHTML = '';
+        const shown = zoomed(buckets);
+        cardTarget = charts;
+        try {
+            if (shown.length < buckets.length) {
+                const sum = (g, dir) => shown.reduce((a, b) => a + b[dir][g], 0);
+                const last = shown[shown.length - 1];
+                charts.insertAdjacentHTML('beforeend', `<p class="sub">${clock(shown[0].start)}–${clock(last.start + bucketSize)}: ` +
+                    `${sum('male', 'in')} mænd og ${sum('female', 'in')} kvinder kom, ${sum('male', 'out')} mænd og ${sum('female', 'out')} kvinder gik. ` +
+                    `Til stede ved slut: ${last.cumMale} mænd, ${last.cumFemale} kvinder.</p>`);
+            }
+            barChart(shown);
+            ratioChart(shown);
+            table(shown);
+        } finally {
+            cardTarget = null;
+        }
+    }
+
+    function zoomControls(buckets, charts) {
+        if (buckets.length < 2) return;
+        const c = card('Periode', 'Træk i skyderne for at zoome ind på en del af runden.');
+        c.classList.add('zoom');
+        const last = buckets.length - 1;
+        const idx = t => Math.max(0, Math.min(last, Math.floor((t - buckets[0].start) / bucketSize)));
+        const from = zoom ? idx(zoom[0]) : 0;
+        const to = zoom ? idx(zoom[1] - 1) : last;
+        c.insertAdjacentHTML('beforeend', `
+            <label>Fra <input type="range" id="zoomFrom" min="0" max="${last}" step="1" value="${from}"><output id="zoomFromOut"></output></label>
+            <label>Til <input type="range" id="zoomTo" min="0" max="${last}" step="1" value="${to}"><output id="zoomToOut"></output></label>
+            <div class="row"><span class="sub" id="zoomLen" style="margin:0"></span><button id="zoomReset">Hele runden</button></div>`);
+        const fromEl = c.querySelector('#zoomFrom'), toEl = c.querySelector('#zoomTo');
+        const update = moved => {
+            let f = Number(fromEl.value), t = Number(toEl.value);
+            if (f > t) { if (moved === fromEl) toEl.value = t = f; else fromEl.value = f = t; }
+            c.querySelector('#zoomFromOut').textContent = clock(buckets[f].start);
+            c.querySelector('#zoomToOut').textContent = clock(buckets[t].start + bucketSize);
+            const min = Math.round((t - f + 1) * bucketSize / 60);
+            c.querySelector('#zoomLen').textContent = f === 0 && t === last ? 'Hele runden' : `${min} minutter valgt`;
+            zoom = f === 0 && t === last ? null : [buckets[f].start, buckets[t].start + bucketSize];
+        };
+        update();
+        fromEl.addEventListener('input', () => { update(fromEl); renderCharts(buckets, charts); });
+        toEl.addEventListener('input', () => { update(toEl); renderCharts(buckets, charts); });
+        c.querySelector('#zoomReset').addEventListener('click', () => {
+            fromEl.value = 0; toEl.value = last; update(); renderCharts(buckets, charts);
+        });
+    }
+
+    // CSV as written by "Hent CSV": runde,tidspunkt,køn,ændring[,type]. Also accepts ';'
+    // (spreadsheet programs with Danish settings save that way).
+    function parseCsv(text) {
+        const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim());
+        if (lines.length < 2) throw new Error('Filen er tom.');
+        const sep = lines[0].includes(';') && !lines[0].includes(',') ? ';' : ',';
+        const head = lines[0].toLowerCase().split(sep).map(h => h.trim());
+        const col = name => {
+            const i = head.indexOf(name);
+            if (i < 0 && name !== 'type') throw new Error(`Kolonnen "${name}" mangler. Brug en fil fra Hent CSV.`);
+            return i;
+        };
+        const [cR, cT, cG, cD, cK] = ['runde', 'tidspunkt', 'køn', 'ændring', 'type'].map(col);
+        const byRound = new Map();
+        lines.slice(1).forEach((line, n) => {
+            const f = line.split(sep).map(x => x.trim());
+            const t = Math.floor(Date.parse(f[cT]) / 1000);
+            const g = { mand: 'male', male: 'male', kvinde: 'female', female: 'female' }[(f[cG] || '').toLowerCase()];
+            const d = parseInt(f[cD], 10);
+            if (isNaN(t) || !g || isNaN(d)) throw new Error(`Linje ${n + 2} kan ikke læses: ${line}`);
+            const r = parseInt(f[cR], 10) || 1;
+            if (!byRound.has(r)) byRound.set(r, []);
+            byRound.get(r).push(cK >= 0 && f[cK] === 'start' ? [t, g, d, 'start'] : [t, g, d]);
+        });
+        return [...byRound.keys()].sort((a, b) => a - b)
+            .map(k => byRound.get(k).sort((a, b) => a[0] - b[0]));
     }
 
     function renderRoundPicker(rounds) {
@@ -343,7 +475,7 @@
             const btn = document.createElement('button');
             btn.textContent = 'Runde ' + (i + 1);
             btn.setAttribute('aria-pressed', i === selectedRound);
-            btn.addEventListener('click', () => { selectedRound = i; render(); });
+            btn.addEventListener('click', () => { selectedRound = i; zoom = null; render(); });
             seg.appendChild(btn);
         });
     }
@@ -355,12 +487,31 @@
     }));
 
     document.getElementById('csv').addEventListener('click', () => {
-        const lines = ['runde,tidspunkt,køn,ændring'].concat(getRounds().flatMap((r, i) => r.map(([t, g, d]) =>
-            `${i + 1},${new Date(t * 1000).toISOString()},${g === 'male' ? 'mand' : 'kvinde'},${d}`)));
+        const lines = ['runde,tidspunkt,køn,ændring,type'].concat(sourceRounds().flatMap((r, i) => r.map(e =>
+            `${i + 1},${new Date(e[0] * 1000).toISOString()},${e[1] === 'male' ? 'mand' : 'kvinde'},${e[2]},${isStart(e) ? 'start' : ''}`)));
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
         a.download = 'tangled-log.csv';
         a.click();
+    });
+
+    document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFile').click());
+    document.getElementById('importFile').addEventListener('change', async e => {
+        const file = e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        try {
+            const rounds = parseCsv(await file.text());
+            if (rounds.length === 0) throw new Error('Ingen indtastninger i filen.');
+            imported = { name: file.name, rounds };
+            selectedRound = null;
+            zoom = null;
+            renderSource();
+            render();
+        } catch (err) {
+            document.getElementById('sourceBar').innerHTML = '<div class="source"><span class="error"></span></div>';
+            document.querySelector('#sourceBar .error').textContent = 'Kunne ikke importere: ' + err.message;
+        }
     });
 
     let resizeTimer;
